@@ -1,0 +1,514 @@
+{
+  "name": "Group 8 - Restaurant Chain Dynamic Menu Pricing & Food-Waste Minimizer",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "1948a6be-5fbd-45e4-8e56-f1ae93ca6704",
+      "name": "Daily Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": " SELECT\n    i.location_id,\n    i.location_name,\n    i.location_address,\n    i.ingredient_id,\n    i.ingredient_name,\n    i.current_stock,\n    i.unit,\n    i.expiry_date,\n    i.dish_id,\n    i.dish_name,\n    i.current_price,\n    i.competitor_search_url,\n    i.pos_update_url,\n    COALESCE(d.forecast_units, 10) AS forecast_units,\n    COALESCE(d.forecast_confidence, 0.70) AS forecast_confidence\nFROM restaurant_inventory AS i\nLEFT JOIN restaurant_demand_forecast AS d\n    ON d.location_id = i.location_id\n    AND d.dish_id = i.dish_id\nWHERE i.expiry_date >= CURRENT_DATE\n    AND i.current_stock > 0\nORDER BY i.location_id, i.expiry_date;",
+        "options": {}
+      },
+      "id": "2dea1505-4a42-4a22-8c25-7c084a09ff93",
+      "name": "Database - Inventory & Menu",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        240,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "y1G4Gh9EA0ncDG9D",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "includeOtherFields": true,
+        "options": {
+          "dotNotation": true
+        }
+      },
+      "id": "48f53d2b-4a32-493c-9731-c1ad68528114",
+      "name": "Edit Fields - Normalize Restaurant Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        512,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "MapSearch",
+        "operation": "search",
+        "query": "={{ $json.dish_name + ' restaurant menu price Lagos Nigeria' }}",
+        "limit": 5,
+        "requestOptions": {}
+      },
+      "id": "45c23cf7-8fd3-41c7-8a49-969d5e0054d3",
+      "name": "Firecrawl - Competitor Menu Search",
+      "type": "@mendable/n8n-nodes-firecrawl.firecrawl",
+      "typeVersion": 1.1,
+      "position": [
+        768,
+        0
+      ],
+      "credentials": {
+        "firecrawlApi": {
+          "id": "K7uM1NNLNO5kCtJ4",
+          "name": "Firecrawl account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "id": "089e5b67-c6cb-49b4-a1ec-93d4fff767ab",
+      "name": "Merge - Inventory + Competitor Results",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1024,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const today = new Date();\nconst daysBetween = (a,b) => Math.ceil((new Date(a) - new Date(b)) / 86400000);\n\nreturn $input.all().map(item => {\n  const r = item.json;\n  const daysToExpiry = r.expiry_date ? daysBetween(r.expiry_date, today) : 999;\n  const stock = Number(r.current_stock || 0);\n  const price = Number(r.current_price || 0);\n  const forecast = Number(r.forecast_units || 0);\n\n  // Firecrawl search results vary by version. We keep the calculation\n  // deterministic and use a competitor price supplied in the scraped\n  // result when one is available.\n  const text = JSON.stringify(r);\n  const matches = [...text.matchAll(/(?:₦|NGN|N)?\\s?([0-9]{1,3}(?:,[0-9]{3})+(?:\\.\\d+)?|[0-9]{3,6}(?:\\.\\d+)?)/g)];\n  const candidatePrices = matches\n    .map(m => Number(String(m[1]).replace(/,/g,'')))\n    .filter(n => n >= 1000 && n <= 100000);\n\n  const competitorPrice = candidatePrices.length\n    ? candidatePrices.reduce((a,b) => a+b,0) / candidatePrices.length\n    : null;\n\n  const wasteRisk = Math.max(0, daysToExpiry <= 0 ? stock * 10 : (stock / Math.max(daysToExpiry,1)));\n  const competitiveGap = competitorPrice === null ? null : price - competitorPrice;\n\n  return {\n    json: {\n      ...r,\n      days_to_expiry: daysToExpiry,\n      waste_risk_score: Number(wasteRisk.toFixed(2)),\n      competitor_price: competitorPrice === null ? null : Number(competitorPrice.toFixed(2)),\n      competitive_gap: competitiveGap === null ? null : Number(competitiveGap.toFixed(2)),\n      demand_signal: forecast > stock ? \"HIGH\" : forecast >= stock * 0.6 ? \"MEDIUM\" : \"LOW\"\n    }\n  };\n});"
+      },
+      "id": "aa9b83df-7845-4810-acb1-777e45cd26c2",
+      "name": "Code - Waste Risk & Pricing Gap",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1264,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "decision_context",
+              "value": "={{ JSON.stringify({location:$json.location_name,dish:$json.dish_name,current_price:$json.current_price,competitor_price:$json.competitor_price,competitive_gap:$json.competitive_gap,stock:$json.current_stock,expiry:$json.expiry_date,days_to_expiry:$json.days_to_expiry,waste_risk_score:$json.waste_risk_score,forecast_units:$json.forecast_units,demand_signal:$json.demand_signal}) }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "cb03a2b4-8591-417f-99a0-f4596ba0738a",
+      "name": "Edit Fields - AI Decision Context",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1488,
+        -32
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "bcbc6dbc-aa31-47c2-997b-4f6725640246",
+      "name": "Loop Over Items - Each Location/Dish",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        2208,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "C0C6M716TNU",
+          "mode": "list",
+          "cachedResultName": "all-restaurant-daily-report"
+        },
+        "text": "={{ '🍽️ Restaurant Pricing Recommendation: ' + ($json.location_name || '') + ' — ' + ($json.dish_name || '') + '\\nAction: ' + ($json.action || '') + '\\nSuggested price: ₦' + ($json.suggested_price ?? '') + '\\nWaste risk: ' + ($json.waste_risk_score ?? '') + '\\nReason: ' + ($json.reason || '') }}",
+        "otherOptions": {}
+      },
+      "id": "12963e69-8bdf-4ac1-9352-747cc56c929e",
+      "name": "Slack - Regional Manager Report",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        2464,
+        80
+      ],
+      "webhookId": "331f7b23-06eb-4ed1-8f22-d077a3924762",
+      "credentials": {
+        "slackApi": {
+          "id": "4NYmCL48IG4akXC8",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f110c401-a954-4807-b0cd-0a6e5ee4aa61",
+              "name": "location_name",
+              "value": "={{ JSON.parse($json.output.replace(/```json|```/g, '').trim()).location_name }}",
+              "type": "string"
+            },
+            {
+              "id": "199bf734-0a08-45cc-bd59-1125be0607ab",
+              "name": "dish_name",
+              "value": "={{ JSON.parse($json.output.replace(/```json|```/g, '').trim()).dish_name }}",
+              "type": "string"
+            },
+            {
+              "id": "87d63406-e829-44c0-b076-6a1b1fb5d75a",
+              "name": "action",
+              "value": "={{ JSON.parse($json.output.replace(/```json|```/g, '').trim()).action }}\n",
+              "type": "string"
+            },
+            {
+              "id": "c85c0f06-e1bd-4733-858e-f5fff31d5a91",
+              "name": "=suggested_price",
+              "value": "={{ Number(JSON.parse($json.output.replace(/```json|```/g, '').trim()).suggested_price) }}",
+              "type": "number"
+            },
+            {
+              "id": "9a2bea54-6556-4a7c-a3a4-d06673613216",
+              "name": "discount_percent",
+              "value": "={{ Number(JSON.parse($json.output.replace(/```json|```/g, '').trim()).discount_percent) }}",
+              "type": "number"
+            },
+            {
+              "id": "f9d0e0ff-7639-40ce-a627-0d445b50e530",
+              "name": "pos_update_url",
+              "value": "={{ $('Database - Inventory & Menu').item.json.pos_update_url }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {
+          "dotNotation": true
+        }
+      },
+      "id": "8723afc5-43ec-48ab-a48a-a98b6d0eb433",
+      "name": "Edit Fields - Parse AI Decision",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1952,
+        -256
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "22881a65-cf2f-48a8-a75c-d56e85c8d9dd",
+              "name": "ai_input",
+              "value": "={{ (() => { const d = JSON.parse($json.decision_context); return JSON.stringify({location:d.location,dish:d.dish,current_price:d.current_price,competitor_price:d.competitor_price,days_to_expiry:d.days_to_expiry,waste_risk_score:d.waste_risk_score,forecast_units:d.forecast_units,demand_signal:d.demand_signal}); })() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1664,
+        -16
+      ],
+      "id": "e205436e-b15b-43cf-a2be-5e4fc7b6892b",
+      "name": "Edit Fields-AI Input Compact"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        1872,
+        16
+      ],
+      "id": "08438194-355f-4f2a-9ae5-8e4bd96e8bd5",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "S4bgevdJto6lrU68",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.ai_input }}",
+        "options": {
+          "systemMessage": "You are the pricing and food-waste decision assistant for a Lagos restaurant chain. Review the supplied JSON for one dish. Recommend a chef's-special decision and a price adjustment only when justified by expiry risk, stock, demand forecast, and competitor pricing. Never underprice below the competitor unless waste risk is high and explain why. Return ONLY valid JSON with keys: location_name, dish_name, action, suggested_price, discount_percent, reason, waste_risk_score, competitive_gap, confidence, pos_update_url. Keep suggested_price numeric and preserve pos_update_url exactly."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1504,
+        -368
+      ],
+      "id": "5ac47493-f35a-4acd-9237-bb8e49f65fc1",
+      "name": "AI Agent-Chef's Special & Price Decision"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [
+        2176,
+        400
+      ],
+      "id": "c93e7cad-6928-4c38-8a66-5349a9dd05f0",
+      "name": "Limit"
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "C0C6M716TNU",
+          "mode": "list",
+          "cachedResultName": "all-restaurant-daily-report"
+        },
+        "text": "✅ Daily Restaurant Pricing Workflow Completed!  All 10 restaurant records have been processed.  Pricing recommendations and waste-risk reports have been generated successfully.  — Group 8 Restaurant Automation System",
+        "otherOptions": {}
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.5,
+      "position": [
+        2384,
+        400
+      ],
+      "id": "9ed0cd05-e57e-4a4f-acf9-89ffff06991f",
+      "name": "Slack-Daily Completion Summary",
+      "webhookId": "1b424fd2-d0f1-4122-a668-91034bb14d26",
+      "credentials": {
+        "slackApi": {
+          "id": "4NYmCL48IG4akXC8",
+          "name": "Slack account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Daily Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Database - Inventory & Menu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Database - Inventory & Menu": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields - Normalize Restaurant Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields - Normalize Restaurant Data": {
+      "main": [
+        [
+          {
+            "node": "Firecrawl - Competitor Menu Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Firecrawl - Competitor Menu Search": {
+      "main": [
+        [
+          {
+            "node": "Merge - Inventory + Competitor Results",
+            "type": "main",
+            "index": 1
+          },
+          {
+            "node": "Merge - Inventory + Competitor Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge - Inventory + Competitor Results": {
+      "main": [
+        [
+          {
+            "node": "Code - Waste Risk & Pricing Gap",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Waste Risk & Pricing Gap": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields - AI Decision Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields - AI Decision Context": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields-AI Input Compact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items - Each Location/Dish": {
+      "main": [
+        [
+          {
+            "node": "Limit",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Slack - Regional Manager Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack - Regional Manager Report": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items - Each Location/Dish",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields - Parse AI Decision": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items - Each Location/Dish",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields-AI Input Compact": {
+      "main": [
+        [
+          {
+            "node": "AI Agent-Chef's Special & Price Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent-Chef's Special & Price Decision",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent-Chef's Special & Price Decision": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields - Parse AI Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limit": {
+      "main": [
+        [
+          {
+            "node": "Slack-Daily Completion Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "b41e73f6-3aa4-4954-87f6-8050c4b90049",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "09f6cb8b40f0882b95bb68e92abc6ad149c11ede30ffb343a7b28157b87be5ea"
+  },
+  "nodeGroups": [],
+  "id": "bDzA58GegPkL1TlJ",
+  "tags": []
+}
