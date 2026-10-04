@@ -33,13 +33,7 @@
       "position": [
         240,
         0
-      ],
-      "credentials": {
-        "postgres": {
-          "id": "y1G4Gh9EA0ncDG9D",
-          "name": "Postgres account"
-        }
-      }
+      ]
     },
     {
       "parameters": {
@@ -72,13 +66,7 @@
       "position": [
         768,
         0
-      ],
-      "credentials": {
-        "firecrawlApi": {
-          "id": "K7uM1NNLNO5kCtJ4",
-          "name": "Firecrawl account"
-        }
-      }
+      ]
     },
     {
       "parameters": {
@@ -149,9 +137,9 @@
         "select": "channel",
         "channelId": {
           "__rl": true,
-          "value": "C0C6M716TNU",
+          "value": "",
           "mode": "list",
-          "cachedResultName": "all-restaurant-daily-report"
+          "cachedResultName": "Select your Slack channel after import"
         },
         "text": "={{ '🍽️ Restaurant Pricing Recommendation: ' + ($json.location_name || '') + ' — ' + ($json.dish_name || '') + '\\nAction: ' + ($json.action || '') + '\\nSuggested price: ₦' + ($json.suggested_price ?? '') + '\\nWaste risk: ' + ($json.waste_risk_score ?? '') + '\\nReason: ' + ($json.reason || '') }}",
         "otherOptions": {}
@@ -163,14 +151,7 @@
       "position": [
         2464,
         80
-      ],
-      "webhookId": "331f7b23-06eb-4ed1-8f22-d077a3924762",
-      "credentials": {
-        "slackApi": {
-          "id": "4NYmCL48IG4akXC8",
-          "name": "Slack account"
-        }
-      }
+      ]
     },
     {
       "parameters": {
@@ -196,7 +177,7 @@
             },
             {
               "id": "c85c0f06-e1bd-4733-858e-f5fff31d5a91",
-              "name": "=suggested_price",
+              "name": "suggested_price",
               "value": "={{ Number(JSON.parse($json.output.replace(/```json|```/g, '').trim()).suggested_price) }}",
               "type": "number"
             },
@@ -210,6 +191,18 @@
               "id": "f9d0e0ff-7639-40ce-a627-0d445b50e530",
               "name": "pos_update_url",
               "value": "={{ $('Database - Inventory & Menu').item.json.pos_update_url }}",
+              "type": "string"
+            },
+            {
+              "id": "967e2117-b9ae-4b93-8671-21f078894450",
+              "name": "waste_risk_score",
+              "value": "={{ JSON.parse($json.output.replace(/```json|```/g, '').trim()).waste_risk_score }}",
+              "type": "number"
+            },
+            {
+              "id": "eae389cf-472d-4b1a-95d4-1dd7fba02eb9",
+              "name": "reason",
+              "value": "={{ JSON.parse($json.output.replace(/```json|```/g, '').trim()).reason }}",
               "type": "string"
             }
           ]
@@ -263,13 +256,7 @@
         16
       ],
       "id": "08438194-355f-4f2a-9ae5-8e4bd96e8bd5",
-      "name": "Google Gemini Chat Model",
-      "credentials": {
-        "googlePalmApi": {
-          "id": "S4bgevdJto6lrU68",
-          "name": "Google Gemini(PaLM) Api account"
-        }
-      }
+      "name": "Google Gemini Chat Model"
     },
     {
       "parameters": {
@@ -304,9 +291,9 @@
         "select": "channel",
         "channelId": {
           "__rl": true,
-          "value": "C0C6M716TNU",
+          "value": "",
           "mode": "list",
-          "cachedResultName": "all-restaurant-daily-report"
+          "cachedResultName": "Select your Slack channel after import"
         },
         "text": "✅ Daily Restaurant Pricing Workflow Completed!  All 10 restaurant records have been processed.  Pricing recommendations and waste-risk reports have been generated successfully.  — Group 8 Restaurant Automation System",
         "otherOptions": {}
@@ -318,14 +305,7 @@
         400
       ],
       "id": "9ed0cd05-e57e-4a4f-acf9-89ffff06991f",
-      "name": "Slack-Daily Completion Summary",
-      "webhookId": "1b424fd2-d0f1-4122-a668-91034bb14d26",
-      "credentials": {
-        "slackApi": {
-          "id": "4NYmCL48IG4akXC8",
-          "name": "Slack account"
-        }
-      }
+      "name": "Slack-Daily Completion Summary"
     }
   ],
   "pinData": {},
@@ -497,18 +477,17 @@
       ]
     }
   },
-  "active": false,
+  "active": true,
   "settings": {
     "executionOrder": "v1",
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "versionId": "b41e73f6-3aa4-4954-87f6-8050c4b90049",
-  "meta": {
-    "templateCredsSetupCompleted": true,
-    "instanceId": "09f6cb8b40f0882b95bb68e92abc6ad149c11ede30ffb343a7b28157b87be5ea"
-  },
+  "meta": {},
   "nodeGroups": [],
+  "tags": []
+}
+
   "id": "bDzA58GegPkL1TlJ",
   "tags": []
 }
